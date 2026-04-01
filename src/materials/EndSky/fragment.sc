@@ -17,6 +17,11 @@ void main() {
     vec3 color = renderEndSky(getEndHorizonCol(), getEndZenithCol(), normalize(v_posTime.xyz), v_posTime.w);
     color += 2.8*diffuse.rgb; // stars
 
+   //agujero negro 
+  vec4 bh = renderBlackhole(normalize(v_posTime.xyz), v_posTime.w);
+    color *= bh.a;  // absorb light in center
+    color += bh.rgb;  // add ring light
+
     color = colorCorrection(color);
 
     gl_FragColor = vec4(color, 1.0);
