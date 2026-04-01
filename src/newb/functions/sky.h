@@ -126,29 +126,51 @@ vec3 renderOverworldSky(nl_skycolor skyCol, nl_environment env, vec3 viewDir, bo
   return sky;
 }
 
-vec3 renderEndSky(vec3 horizonCol, vec3 zenithCol, vec3 viewDir, float t) {
-  t *= 0.1;
-  float a = atan2(viewDir.x, viewDir.z);
+// sunrise/sunset bloom
+vec3 getSunBloom(float viewDirX, vec3 horizonEdgeCol, vec3 FOG_COLOR) {
+  float factor = FOG_COLOR.r/(0.01 + length(FOG_COLOR));
+  factor *= factor;
+  factor *= factor;
 
-  float n1 = 0.5 + 0.5*sin(3.0*a + t + 10.0*viewDir.x*viewDir.y);
-  float n2 = 0.5 + 0.5*sin(5.0*a + 0.5*t + 5.0*n1 + 0.1*sin(40.0*a -4.0*t));
+  float spread = smoothstep(0.0, 1.0, abs(viewDirX));
+  float sunBloom = spread*spread;
+  sunBloom = 0.5*spread + sunBloom*sunBloom*sunBloom*1.5;
 
-  float waves = 0.7*n2*n1 + 0.3*n1;
+  return NL_MORNING_SUN_COL*horizonEdgeCol*(sunBloom*factor*factor);
+}
 
-  float grad = 0.5 + 0.5*viewDir.y;
-  float streaks = waves*(1.0 - grad*grad*grad);
-  streaks += (1.0-streaks)*smoothstep(1.0-waves, -1.0, viewDir.y);
+//END CIELO 
+vec3 getPuaColor(float angle, float t) {
+    // Transición entre los dos colores según el ángulo y el tiempo
+    float mixFactor = 0.5 + 0.5 * sin(angle * 10.0 + t * 1.0); // Oscilación con el ángulo y tiempo
+    return mix(PUA_COLOR_1, PUA_COLOR_2, mixFactor); // Mezcla entre los dos colores
+}
+vec3 renderEndSky(vec3 horizonCol, vec3 zenithCol, vec3 v, float t) {
+    vec3 sky = vec3(0.0, 0.0, 0.0);
+    v.y = smoothstep(-0.4, 1.6, abs(v.y));
+    v.x += 0.0 * sin(80.0 * v.y - t + v.z);
 
-  float f = 0.3*streaks + 0.7*smoothstep(1.0, -0.5, viewDir.y);
-  float h = streaks*streaks;
-  float g = h*h;
-  g *= g;
+    float a = atan2(v.x, v.z); // Calculamos el ángulo para las púas
 
-  vec3 sky = mix(zenithCol, horizonCol, f*f);
-  sky += (0.1*streaks + 2.0*g*g*g + h*h*h)*vec3(2.0,0.5,0.0);
-  sky += 0.25*streaks*spectrum(sin(2.0*viewDir.x*viewDir.y+t));
+    float s = sin(a * 30.0 + t);
+    s = s * s;
+    s *= 1.7 + 0.7 * sin(a * 10.0 - 0.5 * t);
+    float g = smoothstep(0.9 - s, -5.0, v.y);
 
-  return sky;
+    // Mezcla de colores en función del ángulo y la posición
+    float f = (2.0 * g + 1.0 * smoothstep(1.0, -0.1, v.y));
+    float h = (1.0 * g + 1.53 * smoothstep(1.2, -0.2, v.y));
+
+    // Mezcla del color del cielo
+    sky += mix(zenithCol, horizonCol, f * f * f);
+
+    // Obtener el color de las púas
+    vec3 puaColor = getPuaColor(a, t);
+
+    // Aplicar el color de las púas
+    sky += (g * g * 0.2 + 0.9 * h * h * h) * puaColor;
+
+    return sky;
 }
 
 vec3 nlRenderSky(nl_skycolor skycol, nl_environment env, vec3 viewDir, float t, bool isSkyPlane) {
@@ -252,6 +274,35 @@ vec3 nlRenderGalaxy(vec3 vdir, vec3 fogColor, nl_environment env, float t) {
   stars *= mix(1.0, NL_GALAXY_DAY_VISIBILITY, env.dayFactor);
 
   return stars*(1.0-env.rainFactor);
+}
+//agujero negro 
+vec4 renderBlackhole(vec3 vdir, float t) {
+  t *= NL_BH_SPEED;
+  float r = 3.9;
+  vec3 vr = vdir;
+  vr.xy = mat2(cos(r), -sin(r), sin(r), cos(r)) * vr.xy;
+
+  vec3 vd = vr - vec3(0.0, -1.0, 0.0);
+  float nl = sin(15.0 * vd.x + t) * sin(15.0 * vd.y - t) * sin(15.0 * vd.z + t);
+  float a = atan(vd.x, vd.z);
+
+  float d = NL_BH_DIST * length(vd + 0.003 * nl);
+  float d0 = (0.6 - d) / 0.6;
+  float dm0 = 1.0 - max(d0, 0.0);
+
+  float gl = 1.0 - clamp(-0.3 * d0, 0.0, 1.0);
+  float gla = pow(1.0 - min(abs(d0), 1.0), 8.0);
+  float gl8 = pow(gl, 8.0);
+
+  float hole = 0.9 * pow(dm0, 32.0) + 0.1 * pow(dm0, 3.0);
+  float bh = (gla + 0.8 * gl8 + 0.2 * gl8 * gl8) * hole;
+
+  float df = sin(3.0 * a - 4.0 * d + 24.0 * pow(1.4 - d, 4.0) + t);
+  df *= 0.9 + 0.1 * sin(8.0 * a + d + 4.0 * t - 4.0 * df);
+  bh *= 1.0 + pow(df, 4.0) * hole * max(1.0 - bh, 0.0);
+
+  vec3 col = bh * 4.0 * mix(NL_BH_COL_LOW, NL_BH_COL_HIGH, min(bh, 1.0));
+  return vec4(col, hole);
 }
 
 
